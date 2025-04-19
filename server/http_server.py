@@ -8,6 +8,8 @@ Features:
 - Proper MIME type handling for JavaScript files
 - Automatic port cleanup
 - Cache control headers
+- File caching for better performance
+- Improved error handling
 
 Usage:
     python3 server.py
@@ -21,6 +23,8 @@ import os
 import subprocess
 import sys
 import logging
+from functools import lru_cache
+from typing import Optional, Dict, Any
 
 # Configure logging with timestamp, log level, and message format
 logging.basicConfig(
@@ -29,15 +33,39 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# MIME type mapping for common file extensions
+MIME_TYPES = {
+    '.js': 'application/javascript',
+    '.css': 'text/css',
+    '.html': 'text/html',
+    '.json': 'application/json',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon',
+    '.woff': 'font/woff',
+    '.woff2': 'font/woff2',
+    '.ttf': 'font/ttf',
+    '.eot': 'application/vnd.ms-fontobject',
+    '.otf': 'font/otf',
+}
+
 class CORSRequestHandler(SimpleHTTPRequestHandler):
     """
     Custom request handler with CORS support and proper MIME type handling.
     
-    This handler allows cross-origin requests and ensures JavaScript files
-    are served with the correct content type.
+    This handler allows cross-origin requests and ensures files
+    are served with the correct content type and caching headers.
     """
     
-    def end_headers(self):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """Initialize the handler with a file cache."""
+        self.file_cache: Dict[str, tuple[bytes, str]] = {}
+        super().__init__(*args, **kwargs)
+    
+    def end_headers(self) -> None:
         """
         Add CORS and cache control headers to the response.
         
@@ -51,93 +79,112 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate')
         return super().end_headers()
 
-    def do_GET(self):
+    @lru_cache(maxsize=100)
+    def get_file_path(self, path: str) -> str:
         """
-        Handle GET requests.
+        Get the absolute file path for a given request path.
         
-        Specifically handles JavaScript files to ensure they're served
-        with the correct MIME type. For files in the /src/ directory,
-        looks for them relative to the project root.
+        Args:
+            path: The request path
+            
+        Returns:
+            str: The absolute file path
+        """
+        # Handle root path
+        if path == '/':
+            path = '/index.html'
+            
+        if path.startswith('/src/'):
+            return os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                path[1:]
+            )
+        return os.path.join(os.getcwd(), path[1:])
+
+    def get_mime_type(self, path: str) -> str:
+        """
+        Get the MIME type for a file based on its extension.
+        
+        Args:
+            path: The file path
+            
+        Returns:
+            str: The MIME type
+        """
+        ext = os.path.splitext(path)[1].lower()
+        return MIME_TYPES.get(ext, 'application/octet-stream')
+
+    def do_GET(self) -> None:
+        """
+        Handle GET requests with improved file serving and caching.
         
         The method:
-        1. Checks if the request is for a JavaScript file
-        2. Sets appropriate headers
-        3. Determines the correct file path based on the request
-        4. Serves the file content
+        1. Determines the correct file path
+        2. Sets appropriate headers based on file type
+        3. Serves the file content from cache if available
+        4. Falls back to default handler for non-file requests
         """
         try:
-            # Check if the request is for a JavaScript file
-            if self.path.endswith('.js'):
-                # Set response headers for JavaScript files
-                self.send_response(200)
-                self.send_header('Content-type', 'application/javascript')
-                self.end_headers()
-                
-                # Determine the correct file path
-                if self.path.startswith('/src/'):
-                    # For /src/ paths, look in the project root
-                    file_path = os.path.join(
-                        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-                        self.path[1:]
-                    )
-                else:
-                    # For other paths, look in the current working directory
-                    file_path = os.path.join(os.getcwd(), self.path[1:])
-                
-                # Read and serve the file content
-                with open(file_path, 'rb') as file:
-                    self.wfile.write(file.read())
+            # Skip favicon.ico requests
+            if self.path == '/favicon.ico':
+                self.send_error(404)
                 return
-            # For non-JavaScript files, use the default handler
-            return super().do_GET()
+
+            # Get the file path
+            file_path = self.get_file_path(self.path)
+            
+            # Check if file exists
+            if not os.path.isfile(file_path):
+                self.send_error(404)
+                return
+
+            # Get file content from cache or read from disk
+            if file_path in self.file_cache:
+                content, mime_type = self.file_cache[file_path]
+            else:
+                with open(file_path, 'rb') as file:
+                    content = file.read()
+                mime_type = self.get_mime_type(file_path)
+                self.file_cache[file_path] = (content, mime_type)
+
+            # Send response
+            self.send_response(200)
+            self.send_header('Content-type', mime_type)
+            self.send_header('Content-Length', len(content))
+            self.end_headers()
+            self.wfile.write(content)
+
         except Exception as e:
-            # Log any errors that occur while serving files
             logger.error(f"Error serving {self.path}: {str(e)}")
             self.send_error(500, f"Internal server error: {str(e)}")
 
-def cleanup_port(port):
+def cleanup_port(port: int) -> None:
     """
     Attempt to clean up any process using the specified port.
     
-    This function tries to kill any existing process that might be
-    using the specified port to prevent "Address already in use" errors.
-    
     Args:
-        port (int): The port number to clean up
-        
-    The function handles both Windows and Unix-like systems differently:
-    - Windows: Uses taskkill to terminate the process
-    - Unix: Uses pkill to terminate Python server processes
+        port: The port number to clean up
     """
     try:
         if sys.platform == 'win32':
-            # Windows-specific cleanup using taskkill
             subprocess.run(['taskkill', '/F', '/PID', f'$(netstat -ano | findstr :{port})'], check=False)
         else:
-            # Unix-like systems cleanup using pkill
             subprocess.run(['pkill', '-f', f'python.*server.py'], check=False)
     except Exception as e:
-        # Log any errors during cleanup but continue execution
         logger.warning(f"Failed to clean up port {port}: {str(e)}")
 
-def run_server(port=8000):
+def run_server(port: int = 8000) -> None:
     """
-    Start the development server.
-    
-    This function:
-    1. Cleans up any existing process on the port
-    2. Changes to the project root directory
-    3. Creates and starts the HTTP server
-    4. Handles server shutdown on keyboard interrupt
+    Start the development server with improved error handling.
     
     Args:
-        port (int): The port to run the server on (default: 8000)
+        port: The port to run the server on (default: 8000)
     """
     try:
         # Clean up any existing process on the port
         cleanup_port(port)
         
-        # Change to the project root directory for serving files
+        # Change to the project root directory
         os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         
         # Create and start the server
@@ -147,11 +194,9 @@ def run_server(port=8000):
         logger.info('Press Ctrl+C to stop the server')
         httpd.serve_forever()
     except KeyboardInterrupt:
-        # Handle graceful shutdown on Ctrl+C
         logger.info('\nShutting down server...')
         httpd.server_close()
     except Exception as e:
-        # Log any other errors and exit
         logger.error(f"Failed to start server: {str(e)}")
         sys.exit(1)
 

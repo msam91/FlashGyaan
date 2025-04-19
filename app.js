@@ -9,9 +9,28 @@
  * - Progress tracking and word navigation
  * - Offline support using IndexedDB
  * - Touch gestures for mobile devices
+ * - Performance optimizations and caching
  */
 
 const { createApp } = Vue;
+
+// Utility functions
+const debounce = (fn, delay) => {
+    let timeoutId;
+    return (...args) => {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => fn(...args), delay);
+    };
+};
+
+const shuffleArray = (array) => {
+    const shuffled = [...array];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+};
 
 const app = createApp({
     /**
@@ -38,7 +57,11 @@ const app = createApp({
             error: null,           // Error state message
             loadedWordCount: 0,    // Number of words loaded
             quizQuestions: [],     // Array of generated quiz questions
-            currentQuizIndex: 0    // Current quiz question index
+            currentQuizIndex: 0,   // Current quiz question index
+            searchTimeout: null,   // Timeout for search debouncing
+            wordCache: new Map(),  // Cache for word data
+            lastSearchQuery: '',  // Last search query for caching
+            lastSearchResults: [] // Last search results for caching
         }
     },
 
@@ -61,11 +84,23 @@ const app = createApp({
          */
         filteredWords() {
             if (!this.searchQuery || this.isLoading) return [];
+            
+            // Check cache first
+            if (this.lastSearchQuery === this.searchQuery) {
+                return this.lastSearchResults;
+            }
+            
             const query = this.searchQuery.toLowerCase();
-            return this.words.filter(word => 
+            const results = this.words.filter(word => 
                 word.word.toLowerCase().includes(query) ||
                 word.definition.toLowerCase().includes(query)
             );
+            
+            // Update cache
+            this.lastSearchQuery = this.searchQuery;
+            this.lastSearchResults = results;
+            
+            return results;
         }
     },
 
@@ -89,47 +124,15 @@ const app = createApp({
                     return;
                 }
 
-                // If no cached data, load from word lists
-                const wordLists = [
-                    'a-words', 'b-words', 'c-words', 'd-words', 'e-words',
-                    'f-words', 'g-words', 'h-words', 'i-words', 'j-words',
-                    'k-words', 'l-words', 'm-words', 'n-words', 'o-words',
-                    'p-words', 'q-words', 'r-words', 's-words', 't-words',
-                    'u-words', 'v-words', 'w-words', 'x-words', 'y-words',
-                    'z-words'
-                ];
-
+                // If no cached data, collect words from preloaded word lists
                 const allWords = [];
-                for (const list of wordLists) {
-                    try {
-                        const response = await fetch(`config/word-lists/${list}.js`);
-                        if (!response.ok) {
-                            console.error(`Failed to load ${list}: ${response.status} ${response.statusText}`);
-                            continue;
-                        }
-                        const text = await response.text();
-                        
-                        // Create a script element to load the word list
-                        const script = document.createElement('script');
-                        script.textContent = text;
-                        document.head.appendChild(script);
-                        
-                        // Get the words from the window object
-                        const letter = list.charAt(0).toUpperCase();
-                        const words = window[`${letter}_WORDS`];
-                        if (words && Array.isArray(words)) {
-                            console.log(`Loaded ${words.length} words from ${list}`);
-                            allWords.push(...words);
-                            this.loadedWordCount += words.length;
-                        } else {
-                            console.error(`No words found in ${list}`);
-                        }
-                        
-                        // Clean up
-                        document.head.removeChild(script);
-                        delete window[`${letter}_WORDS`];
-                    } catch (error) {
-                        console.error(`Error loading ${list}:`, error);
+                for (let i = 0; i < 26; i++) {
+                    const letter = String.fromCharCode(65 + i); // A to Z
+                    const words = window[`${letter}_WORDS`];
+                    if (words && Array.isArray(words)) {
+                        console.log(`Loaded ${words.length} words from ${letter}-words.js`);
+                        allWords.push(...words);
+                        this.loadedWordCount += words.length;
                     }
                 }
 
@@ -159,10 +162,10 @@ const app = createApp({
          * Updates the UI to show/hide autocomplete suggestions
          * and resets the selected index when input changes
          */
-        handleSearch() {
+        handleSearch: debounce(function() {
             this.showRecommendations = this.searchQuery.length > 0;
             this.selectedIndex = -1;
-        },
+        }, 300),
 
         /**
          * Handle keyboard navigation in the autocomplete dropdown
@@ -207,6 +210,8 @@ const app = createApp({
                 this.searchQuery = '';
                 this.showRecommendations = false;
                 this.selectedIndex = -1;
+                this.lastSearchQuery = '';
+                this.lastSearchResults = [];
             }
         },
 
@@ -249,12 +254,12 @@ const app = createApp({
                                         options.push(randomWord.definition);
                                     }
                                 }
-                                return this.shuffleArray(options);
+                                return shuffleArray(options);
                             }
                         },
                         {
-                            type: 'usage',
-                            question: `Complete the sentence: "${word.example.replace(word.word, '_____')}"`,
+                            type: 'word',
+                            question: `What word means "${word.definition}"?`,
                             correct: word.word,
                             generateOptions: () => {
                                 const options = [word.word];
@@ -265,25 +270,33 @@ const app = createApp({
                                         options.push(randomWord.word);
                                     }
                                 }
-                                return this.shuffleArray(options);
+                                return shuffleArray(options);
                             }
                         }
                     ];
-                    const selectedType = questionTypes[Math.floor(Math.random() * questionTypes.length)];
+                    
+                    const questionType = questionTypes[Math.floor(Math.random() * questionTypes.length)];
                     questions.push({
-                        word: word,
-                        question: selectedType.question,
-                        options: selectedType.generateOptions(),
-                        correct: selectedType.correct
+                        ...questionType,
+                        options: questionType.generateOptions()
                     });
                 }
             }
             
             this.quizQuestions = questions;
             this.currentQuizIndex = 0;
-            this.quizQuestion = questions[0].question;
-            this.quizOptions = questions[0].options;
-            this.quizResult = '';
+            this.showCurrentQuestion();
+        },
+
+        showCurrentQuestion() {
+            if (this.currentQuizIndex < this.quizQuestions.length) {
+                const question = this.quizQuestions[this.currentQuizIndex];
+                this.quizQuestion = question.question;
+                this.quizOptions = question.options;
+                this.quizResult = '';
+            } else {
+                this.showQuiz = false;
+            }
         },
 
         /**
@@ -291,36 +304,19 @@ const app = createApp({
          * @param {string} selected - The selected answer
          */
         checkAnswer(selected) {
-            const currentQuestion = this.quizQuestions[this.currentQuizIndex];
-            const isCorrect = selected === currentQuestion.correct;
-            this.quizResult = isCorrect ? 'Correct!' : 'Try again!';
+            const question = this.quizQuestions[this.currentQuizIndex];
+            if (selected === question.correct) {
+                this.quizResult = 'Correct!';
+                this.streak++;
+            } else {
+                this.quizResult = `Incorrect. The correct answer is: ${question.correct}`;
+                this.streak = 0;
+            }
             
-            if (isCorrect) {
-                setTimeout(() => {
-                    if (this.currentQuizIndex < this.quizQuestions.length - 1) {
-                        this.currentQuizIndex++;
-                        this.quizQuestion = this.quizQuestions[this.currentQuizIndex].question;
-                        this.quizOptions = this.quizQuestions[this.currentQuizIndex].options;
-                        this.quizResult = '';
-                    } else {
-                        this.showQuiz = false;
-                        this.generateQuiz(); // Prepare next set of questions
-                    }
-                }, 1500);
-            }
-        },
-
-        /**
-         * Shuffle an array randomly
-         * @param {Array} array - The array to shuffle
-         * @returns {Array} The shuffled array
-         */
-        shuffleArray(array) {
-            for (let i = array.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [array[i], array[j]] = [array[j], array[i]];
-            }
-            return array;
+            setTimeout(() => {
+                this.currentQuizIndex++;
+                this.showCurrentQuestion();
+            }, 1500);
         },
 
         /**
@@ -336,41 +332,18 @@ const app = createApp({
 
         touchEnd() {
             const swipeDistance = this.touchEndX - this.touchStartX;
-            if (Math.abs(swipeDistance) > 50) {
+            const minSwipeDistance = 50;
+            
+            if (Math.abs(swipeDistance) > minSwipeDistance) {
                 if (swipeDistance > 0) {
                     this.previousWord();
                 } else {
                     this.nextWord();
                 }
             }
-        },
-
-        /**
-         * Navigate through autocomplete suggestions
-         * @param {KeyboardEvent} event - Keyboard event
-         */
-        handleKeydown(event) {
-            if (!this.showRecommendations) return;
             
-            switch(event.key) {
-                case 'ArrowDown':
-                    event.preventDefault();
-                    this.selectedIndex = Math.min(this.selectedIndex + 1, this.filteredWords.length - 1);
-                    break;
-                case 'ArrowUp':
-                    event.preventDefault();
-                    this.selectedIndex = Math.max(this.selectedIndex - 1, -1);
-                    break;
-                case 'Enter':
-                    event.preventDefault();
-                    if (this.selectedIndex >= 0) {
-                        this.goToWord(this.filteredWords[this.selectedIndex]);
-                    }
-                    break;
-                case 'Escape':
-                    this.showRecommendations = false;
-                    break;
-            }
+            this.touchStartX = 0;
+            this.touchEndX = 0;
         },
 
         /**
