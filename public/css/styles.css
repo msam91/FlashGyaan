@@ -1,0 +1,139 @@
+.word-card {
+    transition: transform 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
+    transform-origin: center center;
+    backface-visibility: hidden;
+    will-change: transform;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.word-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+.card-container {
+    perspective: 1000px;
+    height: 500px;
+}
+
+.card-enter {
+    animation: cardEnter 0.5s ease-out forwards;
+}
+
+.card-exit {
+    animation: cardExit 0.5s ease-out forwards;
+}
+
+@keyframes cardEnter {
+    from {
+        opacity: 0;
+        transform: translateX(50px) rotateY(-10deg);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0) rotateY(0);
+    }
+}
+
+@keyframes cardExit {
+    from {
+        opacity: 1;
+        transform: translateX(0) rotateY(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateX(-50px) rotateY(10deg);
+    }
+}
+
+.quiz-option {
+    transition: all 0.2s ease-in-out;
+}
+
+.quiz-option:hover {
+    transform: scale(1.02);
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.word-section,
+.meaning-section,
+.example-section,
+.quiz-section {
+    animation: fadeIn 0.5s ease-out forwards;
+}
+
+.quiz-section {
+    animation-delay: 0.2s;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #666;
+}
+
+/* Swipe indicators */
+.swipe-left-indicator,
+.swipe-right-indicator {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 2rem;
+    color: rgba(0, 0, 0, 0.2);
+    transition: opacity 0.3s ease;
+}
+
+.swipe-left-indicator {
+    left: 10%;
+}
+
+.swipe-right-indicator {
+    right: 10%;
+}
+
+/* Card dragging styles */
+.card-dragging {
+    transition: none;
+    cursor: grabbing;
+}
+
+/* Navigation controls */
+.navigation-controls {
+    z-index: 10;
+}
+
+/* Quiz button */
+.quiz-button-container button {
+    transform: translateY(0);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.quiz-button-container button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+} 

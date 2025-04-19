@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlashGyaan - GRE Vocabulary</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="css/styles.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100">
+    <div id="app" class="container mx-auto px-4 py-8">
+        <div v-if="isLoading" class="text-center py-8">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
+            <p class="mt-4 text-gray-600">Loading words... ({{ loadedWordCount }} loaded)</p>
+        </div>
+        
+        <div v-else-if="error" class="text-center py-8">
+            <p class="text-red-500">{{ error }}</p>
+            <button @click="initializeApp" class="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
+                Retry Loading
+            </button>
+        </div>
+        
+        <div v-else>
+            <header class="text-center mb-8">
+                <h1 class="text-4xl font-bold text-indigo-600 mb-2">FlashGyaan</h1>
+                <p class="text-gray-600">Master GRE vocabulary with interactive flashcards</p>
+                <div class="mt-4 flex justify-center items-center">
+                    <span class="text-sm text-gray-500 mr-2">Word {{ currentIndex + 1 }} of {{ words.length }}</span>
+                    <div class="w-32 h-2 bg-gray-200 rounded-full">
+                        <div class="h-2 bg-indigo-600 rounded-full" :style="{ width: `${(currentIndex + 1) / words.length * 100}%` }"></div>
+                    </div>
+                </div>
+            </header>
+
+            <div class="search-container mb-6 max-w-md mx-auto">
+                <div class="relative">
+                    <input 
+                        type="text" 
+                        v-model="searchQuery" 
+                        @keyup.enter="searchQuery && goToWord(filteredWords[0])"
+                        @keydown="handleKeydown"
+                        @input="handleSearch"
+                        @blur="setTimeout(() => showRecommendations = false, 200)"
+                        placeholder="Search for a word..." 
+                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <button 
+                        v-if="searchQuery" 
+                        @click="searchQuery = ''" 
+                        class="absolute right-2 top-2 text-gray-400 hover:text-gray-600">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+                <!-- Autocomplete dropdown -->
+                <div v-if="showRecommendations && filteredWords.length > 0" 
+                     class="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                    <div v-for="(word, index) in filteredWords.slice(0, 5)" 
+                         :key="word.word"
+                         @mousedown="goToWord(word)"
+                         class="px-4 py-2 hover:bg-indigo-50 cursor-pointer"
+                         :class="{ 'bg-indigo-50': index === selectedIndex }">
+                        <div class="font-medium text-gray-900">{{ word.word }}</div>
+                        <div class="text-sm text-gray-500">{{ word.definition }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <main>
+                <div class="card-container relative max-w-md mx-auto h-96 mb-8">
+                    <!-- Word Card -->
+                    <div 
+                        v-if="!showQuiz"
+                        class="word-card bg-white rounded-lg shadow-lg p-8 absolute w-full h-full"
+                        :class="{ 'card-enter': cardEnter, 'card-exit': cardExit }"
+                        @touchstart="touchStart"
+                        @touchmove="touchMove"
+                        @touchend="touchEnd"
+                        ref="card">
+                        <div class="word-section mb-6">
+                            <h2 class="text-3xl font-bold text-gray-800 mb-2">{{ currentWord.word }}</h2>
+                            <p class="text-lg text-gray-600 italic mb-2">[{{ currentWord.pronunciation }}]</p>
+                            <p class="text-gray-700">{{ currentWord.partOfSpeech }}</p>
+                        </div>
+
+                        <div class="meaning-section mb-6">
+                            <h3 class="text-xl font-semibold text-gray-700 mb-3">Definition</h3>
+                            <p class="text-gray-600">{{ currentWord.definition }}</p>
+                        </div>
+
+                        <div class="example-section mb-6">
+                            <h3 class="text-xl font-semibold text-gray-700 mb-3">Example</h3>
+                            <p class="text-gray-600 italic">{{ currentWord.example }}</p>
+                        </div>
+
+                        <div class="navigation-controls absolute bottom-4 left-0 right-0 flex justify-between px-8">
+                            <button @click="previousWord" class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200">
+                                Previous
+                            </button>
+                            <button @click="showQuiz = true; generateQuiz()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200">
+                                Take Quiz
+                            </button>
+                            <button @click="nextWord" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200">
+                                Next
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Quiz Card -->
+                    <div 
+                        v-else
+                        class="quiz-card bg-white rounded-lg shadow-lg p-8 absolute w-full h-full">
+                        <div class="quiz-header mb-6">
+                            <h2 class="text-2xl font-bold text-gray-800 mb-2">Quiz Question {{ currentQuizIndex + 1 }} of 5</h2>
+                            <div class="w-full h-2 bg-gray-200 rounded-full mb-4">
+                                <div class="h-2 bg-indigo-600 rounded-full" :style="{ width: `${(currentQuizIndex + 1) / 5 * 100}%` }"></div>
+                            </div>
+                        </div>
+
+                        <div class="quiz-content">
+                            <p class="text-gray-700 mb-6 text-lg">{{ quizQuestion }}</p>
+                            <div class="grid grid-cols-1 gap-3">
+                                <button 
+                                    v-for="option in quizOptions" 
+                                    :key="option"
+                                    @click="checkAnswer(option)"
+                                    :class="{
+                                        'quiz-option': true,
+                                        'bg-indigo-50 hover:bg-indigo-100': !quizResult,
+                                        'bg-green-100': quizResult === 'Correct!' && option === quizQuestions[currentQuizIndex].correct,
+                                        'bg-red-100': quizResult !== 'Correct!' && option === quizQuestions[currentQuizIndex].correct
+                                    }"
+                                    class="text-indigo-700 font-semibold py-3 px-4 rounded-lg transition-colors duration-200">
+                                    {{ option }}
+                                </button>
+                            </div>
+                            <p v-if="quizResult" 
+                               :class="{
+                                   'text-green-600': quizResult === 'Correct!',
+                                   'text-red-600': quizResult !== 'Correct!'
+                               }" 
+                               class="mt-4 font-semibold text-center text-lg">
+                                {{ quizResult }}
+                            </p>
+                        </div>
+
+                        <div class="quiz-controls absolute bottom-4 left-0 right-0 flex justify-between px-8">
+                            <button @click="showQuiz = false" class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200">
+                                Back to Words
+                            </button>
+                            <button @click="generateQuiz" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200">
+                                New Quiz
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+    <!-- Word Lists -->
+    <script src="../src/config/word-lists/a-words.js"></script>
+    <script src="../src/config/word-lists/b-words.js"></script>
+    <script src="../src/config/word-lists/c-words.js"></script>
+    <script src="../src/config/word-lists/d-words.js"></script>
+    <script src="../src/config/word-lists/e-words.js"></script>
+    <script src="../src/config/word-lists/f-words.js"></script>
+    <script src="../src/config/word-lists/g-words.js"></script>
+    <script src="../src/config/word-lists/h-words.js"></script>
+    <script src="../src/config/word-lists/i-words.js"></script>
+    <script src="../src/config/word-lists/j-words.js"></script>
+    <script src="../src/config/word-lists/k-words.js"></script>
+    <script src="../src/config/word-lists/l-words.js"></script>
+    <script src="../src/config/word-lists/m-words.js"></script>
+    <script src="../src/config/word-lists/n-words.js"></script>
+    <script src="../src/config/word-lists/o-words.js"></script>
+    <script src="../src/config/word-lists/p-words.js"></script>
+    <script src="../src/config/word-lists/q-words.js"></script>
+    <script src="../src/config/word-lists/r-words.js"></script>
+    <script src="../src/config/word-lists/s-words.js"></script>
+    <script src="../src/config/word-lists/t-words.js"></script>
+    <script src="../src/config/word-lists/u-words.js"></script>
+    <script src="../src/config/word-lists/v-words.js"></script>
+    <script src="../src/config/word-lists/w-words.js"></script>
+    <script src="../src/config/word-lists/x-words.js"></script>
+    <script src="../src/config/word-lists/y-words.js"></script>
+    <script src="../src/config/word-lists/z-words.js"></script>
+    <!-- Main Scripts -->
+    <script src="../src/config/words.js"></script>
+    <script src="../src/js/db.js"></script>
+    <script src="../src/js/app.js"></script>
+</body>
+</html> 
