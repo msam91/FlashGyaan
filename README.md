@@ -2,6 +2,12 @@
 
 FlashGyaan is an interactive web application designed to help users master GRE vocabulary through flashcards and quizzes. Built with Vue.js and modern web technologies, it offers an engaging way to learn and retain new words.
 
+## Version
+
+Current version: 1.0.0
+
+See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
+
 ## Features
 
 - 📚 **Comprehensive Word Database**: Contains extensive GRE vocabulary organized alphabetically
@@ -72,19 +78,16 @@ FlashGyaan is an interactive web application designed to help users master GRE v
 Flash-Gyaan/
 ├── server.py           # Server launcher script
 ├── README.md           # Project documentation
-├── public/             # Public assets
-│   ├── index.html      # Main HTML template
-│   └── css/            # Stylesheets
-│       └── styles.css  # Application styles
-├── src/                # Source code
-│   ├── js/             # JavaScript files
-│   │   ├── app.js      # Main Vue.js application logic
-│   │   └── db.js       # IndexedDB operations and data management
-│   └── config/         # Configuration files
-│       ├── words.js    # Word list configuration
-│       └── word-lists/ # Word list files organized alphabetically
+├── CHANGELOG.md        # Version history and changes
+├── version.txt         # Current version number
+├── index.html          # Main HTML template
+├── styles.css          # Application styles
+├── app.js              # Main Vue.js application logic
+├── db.js               # IndexedDB operations and data management
+├── config/             # Configuration files
+│   └── word-lists/     # Word list files organized alphabetically
 └── server/             # Server code
-    └── server.py       # Development server with CORS support
+    └── http_server.py  # Development server with CORS support
 ```
 
 ## Technical Details
@@ -96,6 +99,49 @@ Flash-Gyaan/
 - **Performance**: Optimized loading and caching strategies
 
 ## Development
+
+### Versioning
+
+This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
+
+- **MAJOR** version (1.0.0) - Incompatible API changes
+- **MINOR** version (0.1.0) - Add functionality in a backward-compatible manner
+- **PATCH** version (0.0.1) - Backward-compatible bug fixes
+
+### Development Workflow
+
+1. **Feature Development**:
+   - Create a feature branch from `develop`: `git checkout -b feature/feature-name develop`
+   - Make changes and commit with descriptive messages
+   - Push to remote: `git push origin feature/feature-name`
+   - Create a pull request to merge into `develop`
+
+2. **Release Process**:
+   - Create a release branch from `develop`: `git checkout -b release/v1.0.0 develop`
+   - Update version in `version.txt` and `CHANGELOG.md`
+   - Commit changes: `git commit -m "Bump version to v1.0.0"`
+   - Merge to `main` and `develop`: 
+     ```
+     git checkout main
+     git merge --no-ff release/v1.0.0
+     git tag -a v1.0.0 -m "Version 1.0.0"
+     git checkout develop
+     git merge --no-ff release/v1.0.0
+     git branch -d release/v1.0.0
+     ```
+
+3. **Hotfix Process**:
+   - Create a hotfix branch from `main`: `git checkout -b hotfix/1.0.1 main`
+   - Fix the issue and update version
+   - Merge to `main` and `develop`:
+     ```
+     git checkout main
+     git merge --no-ff hotfix/1.0.1
+     git tag -a v1.0.1 -m "Version 1.0.1"
+     git checkout develop
+     git merge --no-ff hotfix/1.0.1
+     git branch -d hotfix/1.0.1
+     ```
 
 ### Local Development
 
