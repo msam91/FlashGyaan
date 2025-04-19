@@ -1,0 +1,13 @@
+This directory contains audio pronunciation files for words.
+
+Each audio file should be named after the word in lowercase with .mp3 extension.
+For example: abate.mp3, aberrant.mp3, etc.
+
+To add audio files:
+1. Record or obtain high-quality pronunciation audio
+2. Save as MP3 format
+3. Name the file after the word in lowercase
+4. Place in this directory
+
+The application will automatically look for audio files in this directory.
+If an audio file is not found, it will fall back to using the browser's speech synthesis. 

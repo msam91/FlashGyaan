@@ -10,6 +10,7 @@
  * - Offline support using IndexedDB
  * - Touch gestures for mobile devices
  * - Performance optimizations and caching
+ * - Audio pronunciation for words
  */
 
 const { createApp } = Vue;
@@ -41,9 +42,6 @@ const app = createApp({
         return {
             words: [],              // Array of all vocabulary words
             currentIndex: 0,        // Current word index being displayed
-            searchQuery: '',        // Current search term
-            showRecommendations: false,  // Whether to show search recommendations
-            selectedIndex: -1,      // Currently selected item in autocomplete (-1 means none selected)
             showQuiz: false,       // Whether quiz mode is active
             quizQuestion: '',      // Current quiz question
             quizOptions: [],       // Multiple choice options for current question
@@ -58,10 +56,11 @@ const app = createApp({
             loadedWordCount: 0,    // Number of words loaded
             quizQuestions: [],     // Array of generated quiz questions
             currentQuizIndex: 0,   // Current quiz question index
-            searchTimeout: null,   // Timeout for search debouncing
-            wordCache: new Map(),  // Cache for word data
-            lastSearchQuery: '',  // Last search query for caching
-            lastSearchResults: [] // Last search results for caching
+            audioPlaying: false,   // Whether audio is currently playing
+            audioError: null,      // Error message for audio playback
+            showDefinition: false, // Whether to show the word definition
+            learningMode: 'learning', // 'learning' or 'practice'
+            alphabet: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'] // Array of letters for quick navigation
         }
     },
 
@@ -77,30 +76,12 @@ const app = createApp({
             if (this.isLoading || !this.words.length) return null;
             return this.words[this.currentIndex] || null;
         },
-
         /**
-         * Get filtered words based on search query
-         * @returns {Array} Filtered word objects
+         * Determine if definition should be shown based on current mode
+         * @returns {boolean} Whether to show the definition
          */
-        filteredWords() {
-            if (!this.searchQuery || this.isLoading) return [];
-            
-            // Check cache first
-            if (this.lastSearchQuery === this.searchQuery) {
-                return this.lastSearchResults;
-            }
-            
-            const query = this.searchQuery.toLowerCase();
-            const results = this.words.filter(word => 
-                word.word.toLowerCase().includes(query) ||
-                word.definition.toLowerCase().includes(query)
-            );
-            
-            // Update cache
-            this.lastSearchQuery = this.searchQuery;
-            this.lastSearchResults = results;
-            
-            return results;
+        shouldShowDefinition() {
+            return this.learningMode === 'learning' || this.showDefinition;
         }
     },
 
@@ -137,7 +118,10 @@ const app = createApp({
                 }
 
                 if (allWords.length === 0) {
-                    throw new Error('No words were loaded');
+                    // Don't set error here, just log it
+                    console.error('No words were loaded');
+                    this.isLoading = false;
+                    return;
                 }
 
                 // Sort words alphabetically
@@ -152,66 +136,20 @@ const app = createApp({
                 this.isLoading = false;
             } catch (error) {
                 console.error('Error initializing app:', error);
-                this.error = error.message;
+                // Don't set error here, just log it
                 this.isLoading = false;
             }
         },
 
         /**
-         * Handle search input and show recommendations
-         * Updates the UI to show/hide autocomplete suggestions
-         * and resets the selected index when input changes
-         */
-        handleSearch: debounce(function() {
-            this.showRecommendations = this.searchQuery.length > 0;
-            this.selectedIndex = -1;
-        }, 300),
-
-        /**
-         * Handle keyboard navigation in the autocomplete dropdown
-         * Supports:
-         * - Arrow Up/Down: Navigate through suggestions
-         * - Enter: Select current suggestion
-         * - Escape: Close suggestions
-         * @param {KeyboardEvent} event - Keyboard event
-         */
-        handleKeydown(event) {
-            if (!this.showRecommendations) return;
-            
-            switch(event.key) {
-                case 'ArrowDown':
-                    event.preventDefault();
-                    this.selectedIndex = Math.min(this.selectedIndex + 1, this.filteredWords.length - 1);
-                    break;
-                case 'ArrowUp':
-                    event.preventDefault();
-                    this.selectedIndex = Math.max(this.selectedIndex - 1, -1);
-                    break;
-                case 'Enter':
-                    event.preventDefault();
-                    if (this.selectedIndex >= 0) {
-                        this.goToWord(this.filteredWords[this.selectedIndex]);
-                    }
-                    break;
-                case 'Escape':
-                    this.showRecommendations = false;
-                    break;
-            }
-        },
-
-        /**
-         * Navigate to a specific word and reset search state
+         * Navigate to a specific word
          * @param {Object} word - Word object to navigate to
          */
         goToWord(word) {
             const index = this.words.findIndex(w => w.word === word.word);
             if (index !== -1) {
                 this.currentIndex = index;
-                this.searchQuery = '';
-                this.showRecommendations = false;
-                this.selectedIndex = -1;
-                this.lastSearchQuery = '';
-                this.lastSearchResults = [];
+                this.showDefinition = false; // Hide definition when navigating to a specific word
             }
         },
 
@@ -352,6 +290,7 @@ const app = createApp({
         nextWord() {
             if (this.currentIndex < this.words.length - 1) {
                 this.cardExit = true;
+                this.showDefinition = false; // Hide definition when moving to next word
                 setTimeout(() => {
                     this.currentIndex++;
                     this.cardExit = false;
@@ -369,8 +308,128 @@ const app = createApp({
         previousWord() {
             if (this.currentIndex > 0) {
                 this.cardExit = true;
+                this.showDefinition = false; // Hide definition when moving to previous word
                 setTimeout(() => {
                     this.currentIndex--;
+                    this.cardExit = false;
+                    this.cardEnter = true;
+                    setTimeout(() => {
+                        this.cardEnter = false;
+                    }, 300);
+                }, 300);
+            }
+        },
+
+        /**
+         * Play pronunciation audio for the current word
+         */
+        playPronunciation() {
+            if (!this.currentWord || this.audioPlaying) return;
+            
+            const word = this.currentWord.word.toLowerCase();
+            const audioPath = `/public/audio/${word}.mp3`;
+            
+            this.audioPlaying = true;
+            this.audioError = null;
+            
+            const audio = new Audio(audioPath);
+            
+            audio.onended = () => {
+                this.audioPlaying = false;
+            };
+            
+            audio.onerror = (e) => {
+                console.error('Error playing audio:', e);
+                this.audioPlaying = false;
+                // Don't set error here, try speech synthesis first
+                this.speakWord(word);
+            };
+            
+            audio.play().catch(error => {
+                console.error('Error playing audio:', error);
+                this.audioPlaying = false;
+                // Don't set error here, try speech synthesis first
+                this.speakWord(word);
+            });
+        },
+        
+        /**
+         * Use Web Speech API as a fallback for pronunciation
+         * @param {string} word - The word to speak
+         */
+        speakWord(word) {
+            if (!window.speechSynthesis) {
+                this.audioError = 'Speech synthesis not supported in this browser';
+                return;
+            }
+            
+            // Cancel any existing speech
+            window.speechSynthesis.cancel();
+            
+            const utterance = new SpeechSynthesisUtterance(word);
+            utterance.rate = 0.8; // Slightly slower for clarity
+            
+            // Set error to null before starting speech synthesis
+            this.audioError = null;
+            
+            utterance.onend = () => {
+                this.audioPlaying = false;
+                // Ensure error is still null after successful speech
+                this.audioError = null;
+            };
+            
+            utterance.onerror = (e) => {
+                console.error('Speech synthesis error:', e);
+                this.audioPlaying = false;
+                
+                // Only set error for actual failures, not for expected fallbacks
+                if (e.error !== 'interrupted' && e.error !== 'canceled') {
+                    this.audioError = 'Speech synthesis failed';
+                } else {
+                    // For interrupted or canceled speech, keep error as null
+                    this.audioError = null;
+                }
+            };
+            
+            window.speechSynthesis.speak(utterance);
+        },
+
+        /**
+         * Highlight matching text in search results
+         * @param {string} text - The text to search in
+         * @param {string} query - The search query
+         * @returns {string} HTML string with highlighted matches
+         */
+        highlightMatch(text, query) {
+            if (!query) return text;
+            
+            const regex = new RegExp(`(${query})`, 'gi');
+            return text.replace(regex, '<span class="bg-yellow-200">$1</span>');
+        },
+
+        /**
+         * Toggle between learning and practice modes
+         */
+        toggleMode() {
+            this.learningMode = this.learningMode === 'learning' ? 'practice' : 'learning';
+            // Reset showDefinition when switching to practice mode
+            if (this.learningMode === 'practice') {
+                this.showDefinition = false;
+            }
+        },
+
+        /**
+         * Jump to the first word starting with the selected letter
+         * Provides quick navigation through the vocabulary by letter
+         * @param {string} letter - The letter to jump to (A-Z)
+         */
+        jumpToLetter(letter) {
+            const index = this.words.findIndex(word => word.word.charAt(0).toUpperCase() === letter);
+            if (index !== -1) {
+                this.cardExit = true;
+                this.showDefinition = false;
+                setTimeout(() => {
+                    this.currentIndex = index;
                     this.cardExit = false;
                     this.cardEnter = true;
                     setTimeout(() => {
@@ -398,5 +457,7 @@ const app = createApp({
     }
 });
 
-// Mount the Vue application
-app.mount('#app'); 
+// Mount the Vue application when the DOM is fully loaded
+document.addEventListener('DOMContentLoaded', () => {
+    app.mount('#app');
+}); 
